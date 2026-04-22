@@ -161,21 +161,22 @@ if [ -n "$five" ]; then
   limits="${limits:+${limits}${sep}}${clr}5h:${pct_int}%${time_part}${N}"
 fi
 
-# --- Cache idle timer (Max: 1h TTL) ---
+# --- Cache idle timer (5m TTL, default since 2026-03-06) ---
 cache_state="$HOME/.claude/hooks/cache_last_active"
 cache_seg=""
 if [ -f "$cache_state" ]; then
   last_active=$(cat "$cache_state" 2>/dev/null)
   if [ -n "$last_active" ]; then
     idle=$(( now - last_active ))
-    remain=$(( 3600 - idle ))
+    remain=$(( 300 - idle ))
     if [ "$remain" -le 0 ]; then
       cache_seg="${R}gone${N}"
     else
-      mins=$(( remain / 60 ))
-      if [ "$mins" -ge 30 ]; then cache_seg="${M}${mins}m${N}"
-      elif [ "$mins" -ge 10 ]; then cache_seg="${Y}${mins}m${N}"
-      else cache_seg="${R}${mins}m${N}"
+      expire_ts=$(( last_active + 300 ))
+      expire_mmss=$(date -r "$expire_ts" +"%M'%S\"" 2>/dev/null)
+      if [ "$remain" -ge 180 ]; then cache_seg="${M}${expire_mmss}${N}"
+      elif [ "$remain" -ge 60 ]; then cache_seg="${Y}${expire_mmss}${N}"
+      else cache_seg="${R}${expire_mmss}${N}"
       fi
     fi
   fi
