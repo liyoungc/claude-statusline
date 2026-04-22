@@ -32,18 +32,36 @@ if [ -n "$model" ]; then
   fi
 fi
 
-# --- Context % bar ---
+# --- Context % bar (rainbow gradient: grey→violet→blue→cyan→green→lime→yellow→orange→red) ---
 ctx_pct=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty')
 ctx_seg=""
 if [ -n "$ctx_pct" ]; then
   pct_int=$(printf '%.0f' "$ctx_pct")
   filled=$((pct_int / 10))
   empty=$((10 - filled))
-  bar="" i=0
-  while [ $i -lt $filled ]; do bar="${bar}█"; i=$((i+1)); done
+  bar="" i=1
+  while [ $i -le $filled ]; do
+    case $i in
+      1)  bc='\033[38;5;240m' ;;
+      2)  bc='\033[38;5;57m'  ;;
+      3)  bc='\033[38;5;33m'  ;;
+      4)  bc='\033[38;5;45m'  ;;
+      5)  bc='\033[38;5;46m'  ;;
+      6)  bc='\033[38;5;190m' ;;
+      7)  bc='\033[38;5;226m' ;;
+      8)  bc='\033[38;5;214m' ;;
+      9)  bc='\033[38;5;202m' ;;
+     10)  bc='\033[38;5;196m' ;;
+      *)  bc='\033[0m'        ;;
+    esac
+    bar="${bar}${bc}█"
+    i=$((i+1))
+  done
+  DIM='\033[38;5;236m'
   i=0
-  while [ $i -lt $empty ]; do bar="${bar}░"; i=$((i+1)); done
-  ctx_seg="${C}${pct_int}% ${bar}${N}"
+  while [ $i -lt $empty ]; do bar="${bar}${DIM}░"; i=$((i+1)); done
+  if [ "$pct_int" -ge 80 ]; then lclr="$R"; else lclr="$C"; fi
+  ctx_seg="${lclr}${pct_int}% ${N}${bar}${N}"
 fi
 
 # --- Directory ---
