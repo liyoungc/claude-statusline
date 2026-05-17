@@ -1,34 +1,85 @@
 #!/bin/sh
 # Claude Code statusline — ccline color scheme, no emoji
-# Segments: Model | Ctx | Dir | Git | GH Status | 5h% 7d%
+# Segments: Model [effort] | Ctx | Dir | Git | GH Status | cache | 5h 7d
 input=$(cat)
 
-# --- Colors (matching ccline cometix c16 palette) ---
-M='\033[1;96m'   # model: bold bright cyan (c16=14)
-DI='\033[1;93m'  # dir icon: bold bright yellow (c16=11)
-DT='\033[1;92m'  # dir text: bold bright green (c16=10)
-G='\033[1;94m'   # git: bold bright blue (c16=12)
-C='\033[1;95m'   # cost: bold bright magenta (c16=13)
+# --- Color palettes (8 coordinated sets) ---------------------------------
+# Each palette = "name M_color DT_color G_color C_color"
+# (warning Y/R kept identical across all palettes for stable semantics)
+palette_table() {
+  cat <<'PALETTES'
+cyan     51  35  39  207
+ocean    38  49  75  81
+forest   35  71  28  178
+sunset   208 215 173 213
+lavender 141 147 105 177
+rose     211 218 175 220
+gold     220 178 136 39
+mono     252 248 244 244
+PALETTES
+}
+
+# --- Pick palette for this session ---------------------------------------
+session_id=$(printf '%s' "$input" | jq -r '.session_id // empty')
+palette_dir="$HOME/.claude/statusline_palette"
+override_file="$palette_dir/$session_id"
+
+palette_count=8
+if [ -n "$session_id" ] && [ -f "$override_file" ]; then
+  idx=$(cat "$override_file" 2>/dev/null)
+elif [ -n "$session_id" ]; then
+  # deterministic hash → same session always gets same color
+  n=$(printf '%s' "$session_id" | cksum | awk '{print $1}')
+  idx=$(( n % palette_count + 1 ))
+else
+  idx=1
+fi
+[ "$idx" -ge 1 ] 2>/dev/null && [ "$idx" -le "$palette_count" ] 2>/dev/null || idx=1
+
+palette_row=$(palette_table | awk -v i="$idx" 'NR==i {print}')
+pal_name=$(echo "$palette_row" | awk '{print $1}')
+pal_m=$(echo "$palette_row"    | awk '{print $2}')
+pal_dt=$(echo "$palette_row"   | awk '{print $3}')
+pal_g=$(echo "$palette_row"    | awk '{print $4}')
+pal_c=$(echo "$palette_row"    | awk '{print $5}')
+
+# --- Colors (session palette + fixed warning colors) ---
+M=$(printf  '\033[1;38;5;%sm' "$pal_m")   # model
+DT=$(printf '\033[1;38;5;%sm' "$pal_dt")  # dir text
+G=$(printf  '\033[1;38;5;%sm' "$pal_g")   # git
+C=$(printf  '\033[1;38;5;%sm' "$pal_c")   # cost / accent
 S='\033[37m'     # separator: white
-Y='\033[1;33m'   # warning yellow
-R='\033[1;31m'   # critical red
+Y='\033[1;33m'   # warning yellow (fixed)
+R='\033[1;31m'   # critical red   (fixed)
 N='\033[0m'      # reset
 
 sep="${S} | ${N}"
 
-# --- Model ---
+# --- Model + reasoning effort -------------------------------------------
 model=$(printf '%s' "$input" | jq -r '.model.display_name // empty')
 ctx_size=$(printf '%s' "$input" | jq -r '.context_window.context_window_size // empty')
+
+effort="${CLAUDE_EFFORT:-}"
+if [ -z "$effort" ] && [ -f "$HOME/.claude/settings.json" ]; then
+  effort=$(jq -r '.effortLevel // empty' "$HOME/.claude/settings.json" 2>/dev/null)
+fi
+effort_tag=""
+case "$effort" in
+  high)   effort_tag=" ${R}[H]${N}" ;;
+  medium) effort_tag=" ${Y}[M]${N}" ;;
+  low)    effort_tag=" ${DT}[L]${N}" ;;
+  none)   effort_tag=" ${S}[-]${N}" ;;
+esac
+
 model_seg=""
 if [ -n "$model" ]; then
-  # Strip "Claude " prefix and any existing context size suffix like "(1M context)"
   short=$(echo "$model" | sed -e 's/Claude //' -e 's/ ([0-9]*[KMG][^ )]*[^)]*)$//')
   if [ "$ctx_size" = "1000000" ]; then
-    model_seg="${M}${short} (1M)${N}"
+    model_seg="${M}${short} (1M)${N}${effort_tag}"
   elif [ -n "$ctx_size" ]; then
-    model_seg="${M}${short} ($((ctx_size/1000))K)${N}"
+    model_seg="${M}${short} ($((ctx_size/1000))K)${N}${effort_tag}"
   else
-    model_seg="${M}${short}${N}"
+    model_seg="${M}${short}${N}${effort_tag}"
   fi
 fi
 
@@ -98,7 +149,6 @@ if [ -n "$cwd" ] && command -v gh >/dev/null 2>&1; then
     fi
   fi
   if [ -z "$cached" ] && [ -n "$gh_cache_key" ]; then
-    # Run gh in background-safe way with timeout
     cached=$(cd "$cwd" && timeout 3 gh run list --branch "$(git symbolic-ref --short HEAD 2>/dev/null)" --limit 1 --json status,conclusion --jq '.[0] | if .conclusion then .conclusion else .status end' 2>/dev/null) || cached=""
     if [ -n "$cached" ]; then
       printf '%s\t%s\n%s' "$now" "$gh_cache_key" "$cached" > "$gh_cache"
@@ -126,7 +176,7 @@ color_pct() {
   p=$(printf '%.0f' "$1" 2>/dev/null || echo 0)
   if [ "$p" -ge 80 ]; then printf '%b' "$R"
   elif [ "$p" -ge 60 ]; then printf '%b' "$Y"
-  else printf '%b' "$M"
+  else printf '%b' "$C"
   fi
 }
 
@@ -174,7 +224,7 @@ if [ -f "$cache_state" ]; then
     else
       expire_ts=$(( last_active + 300 ))
       expire_mmss=$(date -r "$expire_ts" +"%M'%S\"" 2>/dev/null)
-      if [ "$remain" -ge 180 ]; then cache_seg="${M}${expire_mmss}${N}"
+      if [ "$remain" -ge 180 ]; then cache_seg="${C}${expire_mmss}${N}"
       elif [ "$remain" -ge 60 ]; then cache_seg="${Y}${expire_mmss}${N}"
       else cache_seg="${R}${expire_mmss}${N}"
       fi
