@@ -65,6 +65,7 @@ if [ -z "$effort" ] && [ -f "$HOME/.claude/settings.json" ]; then
 fi
 effort_tag=""
 case "$effort" in
+  xhigh)  effort_tag=" ${R}[X]${N}" ;;
   high)   effort_tag=" ${R}[H]${N}" ;;
   medium) effort_tag=" ${Y}[M]${N}" ;;
   low)    effort_tag=" ${DT}[L]${N}" ;;

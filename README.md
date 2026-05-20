@@ -11,7 +11,7 @@ Opus 4.7 (1M) [H] | 6% ░░░░░░░░░░ | myproject | main | ci:ok
 | Segment | Color | Description |
 |---------|-------|-------------|
 | Model | palette-M | Model name + context window size |
-| Effort | red/yellow/dim | Reasoning effort: `[H]` / `[M]` / `[L]` / `[-]` (from `CLAUDE_EFFORT` env or `~/.claude/settings.json:effortLevel`) |
+| Effort | red/yellow/dim | Reasoning effort: `[X]` (xhigh) / `[H]` / `[M]` / `[L]` / `[-]` (from `CLAUDE_EFFORT` env or `~/.claude/settings.json:effortLevel`) |
 | Context | gradient | Usage % with block bar, color shifts violet → red as it fills |
 | Directory | palette-DT | Current working directory |
 | Git | palette-G | Branch + dirty indicator |
