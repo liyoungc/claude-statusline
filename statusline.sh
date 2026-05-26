@@ -121,15 +121,58 @@ if [ -n "$cwd" ]; then
   dir_seg="${DT}${dirname}${N}"
 fi
 
-# --- Git ---
+# --- Git (branch read from HEAD file; dirty-check cached by index mtime) ---
+now=$(date +%s)
 git_seg=""
-if [ -d "${cwd}/.git" ] || git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
-  branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null || git -C "$cwd" describe --tags --exact-match 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+git_dir_path=""
+if [ -d "${cwd}/.git" ]; then
+  git_dir_path="${cwd}/.git"
+elif git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+  gd=$(git -C "$cwd" rev-parse --git-dir 2>/dev/null)
+  case "$gd" in
+    /*) git_dir_path="$gd" ;;
+    *)  git_dir_path="${cwd}/${gd}" ;;
+  esac
+fi
+if [ -n "$git_dir_path" ]; then
+  branch=""
+  head_file="${git_dir_path}/HEAD"
+  if [ -f "$head_file" ]; then
+    head_raw=$(cat "$head_file")
+    case "$head_raw" in
+      "ref: refs/heads/"*) branch="${head_raw#ref: refs/heads/}" ;;
+      "ref: "*) branch="${head_raw#ref: }" ;;
+      *) branch=$(printf '%.7s' "$head_raw") ;;
+    esac
+  fi
+  [ -z "$branch" ] && branch=$(git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
   if [ -n "$branch" ]; then
-    if git -C "$cwd" diff --quiet 2>/dev/null && git -C "$cwd" diff --cached --quiet 2>/dev/null; then
-      git_seg="${G}${branch}${N}"
-    else
+    # Avoid 2x git-diff per tick: cache dirty state keyed by index mtime
+    git_dirty_cache="$HOME/.claude/hooks/git_dirty_cache"
+    index_file="${git_dir_path}/index"
+    imtime=$(stat -c '%Y' "$index_file" 2>/dev/null || stat -f '%m' "$index_file" 2>/dev/null || echo 0)
+    dirty_key="${cwd}__${branch}__${imtime}"
+    dirty_val=""
+    if [ -f "$git_dirty_cache" ]; then
+      ck=$(sed -n '1p' "$git_dirty_cache" 2>/dev/null)
+      ct=$(sed -n '2p' "$git_dirty_cache" 2>/dev/null)
+      cv=$(sed -n '3p' "$git_dirty_cache" 2>/dev/null)
+      if [ "$ck" = "$dirty_key" ] && [ -n "$ct" ] && [ $(( now - ct )) -lt 30 ]; then
+        dirty_val="$cv"
+      fi
+    fi
+    if [ -z "$dirty_val" ]; then
+      if git -C "$cwd" diff --quiet 2>/dev/null && git -C "$cwd" diff --cached --quiet 2>/dev/null; then
+        dirty_val="clean"
+      else
+        dirty_val="dirty"
+      fi
+      printf '%s\n%s\n%s' "$dirty_key" "$now" "$dirty_val" > "$git_dirty_cache"
+    fi
+    if [ "$dirty_val" = "dirty" ]; then
       git_seg="${G}${branch} *${N}"
+    else
+      git_seg="${G}${branch}${N}"
     fi
   fi
 fi
@@ -138,14 +181,13 @@ fi
 gh_seg=""
 if [ -n "$cwd" ] && command -v gh >/dev/null 2>&1; then
   gh_cache="$HOME/.claude/hooks/gh_status_cache"
-  gh_cache_key="${cwd}__$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)"
-  now=$(date +%s)
+  gh_cache_key="${cwd}__${branch}"
   cached="" cache_age=999
   if [ -f "$gh_cache" ]; then
     cache_ts=$(head -1 "$gh_cache" | cut -f1)
     cache_key=$(head -1 "$gh_cache" | cut -f2)
     cache_age=$((now - cache_ts))
-    if [ "$cache_age" -lt 60 ] && [ "$cache_key" = "$gh_cache_key" ]; then
+    if [ "$cache_age" -lt 300 ] && [ "$cache_key" = "$gh_cache_key" ]; then
       cached=$(tail -1 "$gh_cache")
     fi
   fi
@@ -190,7 +232,6 @@ elapsed_pct() {
 }
 
 limits=""
-now=$(date +%s)
 if [ -n "$week" ]; then
   pct_int=$(printf '%.0f' "$week")
   clr=$(color_pct "$week")
